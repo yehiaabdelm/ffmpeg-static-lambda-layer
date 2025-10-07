@@ -14,6 +14,8 @@ jobs:
       AWS_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      S3_KEY: lambda-layers/ffmpeg-layer.zip
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -58,6 +60,10 @@ jobs:
           cd ..
           ls -lh ffmpeg-layer.zip
 
+      - name: Upload layer zip to S3
+        run: |
+          aws s3 cp ffmpeg-layer.zip s3://$S3_BUCKET/$S3_KEY
+
       - name: Publish to AWS Lambda
         id: publish
         run: |
@@ -71,7 +77,7 @@ jobs:
             --license-info "GPLv3" \
             --compatible-runtimes python3.10 python3.11 python3.12 nodejs18.x nodejs20.x provided.al2 \
             --compatible-architectures x86_64 \
-            --zip-file fileb://ffmpeg-layer.zip)
+            --content S3Bucket=$S3_BUCKET,S3Key=$S3_KEY)
 
           echo "$OUTPUT"
           ARN=$(echo "$OUTPUT" | jq -r .LayerVersionArn)
@@ -88,6 +94,10 @@ jobs:
             --statement-id public-access-${{ steps.publish.outputs.version_number }} \
             --action lambda:GetLayerVersion \
             --principal '*'
+
+      - name: Clean up S3 upload
+        run: |
+          aws s3 rm s3://$S3_BUCKET/$S3_KEY || true
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
