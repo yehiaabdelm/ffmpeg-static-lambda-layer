@@ -111,6 +111,5 @@ jobs:
                       **Layer version:** `${{ steps.publish.outputs.version_number }}`  
                       **ARN:** `${{ steps.publish.outputs.arn }}`
                       **Built from:** `  [johnvansickle.com](https://johnvansickle.com/ffmpeg/)
-                      **License:** GPLv3
 
                   files: ffmpeg-layer.zip
