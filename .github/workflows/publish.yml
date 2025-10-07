@@ -1,106 +1,106 @@
 name: Build & Publish FFmpeg Lambda Layer
 
 on:
-    schedule:
-        - cron: "0 9 * * 1"
-    workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
 
 jobs:
-    publish-layer:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        env:
-            AWS_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        steps:
-            - name: Checkout repo
-              uses: actions/checkout@v4
+  publish-layer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      AWS_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-            - name: Fetch latest FFmpeg release
-              id: version
-              run: |
-                  set -e
-                  curl -s https://johnvansickle.com/ffmpeg/release-readme.txt -o release-readme.txt
+      - name: Fetch latest FFmpeg release
+        id: version
+        run: |
+          set -e
+          curl -s https://johnvansickle.com/ffmpeg/release-readme.txt -o release-readme.txt
 
-                  VERSION=$(grep -E '^ *version:' release-readme.txt | awk '{print $2}')
-                  BUILD=$(grep -E '^ *build:' release-readme.txt | awk '{print $2}')
+          VERSION=$(grep -E '^ *version:' release-readme.txt | awk '{print $2}')
+          BUILD=$(grep -E '^ *build:' release-readme.txt | awk '{print $2}')
 
-                  echo "Found version: $VERSION"
-                  echo "Build file: $BUILD"
+          echo "Found version: $VERSION"
+          echo "Build file: $BUILD"
 
-                  echo "version=$VERSION" >> $GITHUB_OUTPUT
-                  echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
 
-            - name: Check if version already exists
-              run: |
-                  LATEST_TAG=$(git tag | grep "ffmpeg-${{ steps.version.outputs.version }}" || true)
-                  if [ ! -z "$LATEST_TAG" ]; then
-                    echo "Version already released ($LATEST_TAG). Exiting."
-                    exit 0
-                  fi
+      - name: Check if version already exists
+        run: |
+          LATEST_TAG=$(git tag | grep "ffmpeg-${{ steps.version.outputs.version }}" || true)
+          if [ ! -z "$LATEST_TAG" ]; then
+            echo "Version already released ($LATEST_TAG). Exiting."
+            exit 0
+          fi
 
-            - name: Build FFmpeg Lambda layer
-              run: |
-                  set -e
-                  URL="https://johnvansickle.com/ffmpeg/ffmpeg-release-amd64-static.tar.xz"
-                  echo "Downloading from $URL"
-                  wget -q "$URL"
-                  tar -xvf "${{ steps.version.outputs.build }}"
+      - name: Build FFmpeg Lambda layer
+        run: |
+          set -e
+          URL="https://johnvansickle.com/ffmpeg/releases/${{ steps.version.outputs.build }}"
+          echo "Downloading from $URL"
+          wget -q "$URL"
+          tar -xvf "${{ steps.version.outputs.build }}"
 
-                  mkdir -p ffmpeg-layer/bin
-                  cp ffmpeg-*-static/ffmpeg ffmpeg-layer/bin/
-                  cp ffmpeg-*-static/ffprobe ffmpeg-layer/bin/
+          mkdir -p ffmpeg-layer/bin
+          cp ffmpeg-*-static/ffmpeg ffmpeg-layer/bin/
+          cp ffmpeg-*-static/ffprobe ffmpeg-layer/bin/
 
-                  cd ffmpeg-layer
-                  zip -r ../ffmpeg-layer.zip .
-                  cd ..
-                  ls -lh ffmpeg-layer.zip
+          cd ffmpeg-layer
+          zip -r ../ffmpeg-layer.zip .
+          cd ..
+          ls -lh ffmpeg-layer.zip
 
-            - name: Publish to AWS Lambda
-              id: publish
-              run: |
-                  LAYER_NAME="ffmpeg-static"
-                  DESCRIPTION="Static FFmpeg ${{ steps.version.outputs.version }} + FFprobe build for Amazon Linux 2"
+      - name: Publish to AWS Lambda
+        id: publish
+        run: |
+          LAYER_NAME="ffmpeg-static"
+          DESCRIPTION="Static FFmpeg ${{ steps.version.outputs.version }} + FFprobe build for Amazon Linux 2"
 
-                  echo "Publishing new layer version..."
-                  OUTPUT=$(aws lambda publish-layer-version \
-                    --layer-name $LAYER_NAME \
-                    --description "$DESCRIPTION" \
-                    --license-info "GPLv3" \
-                    --compatible-runtimes python3.10 python3.11 python3.12 nodejs18.x nodejs20.x provided.al2 \
-                    --compatible-architectures x86_64 \
-                    --zip-file fileb://ffmpeg-layer.zip)
+          echo "Publishing new layer version..."
+          OUTPUT=$(aws lambda publish-layer-version \
+            --layer-name $LAYER_NAME \
+            --description "$DESCRIPTION" \
+            --license-info "GPLv3" \
+            --compatible-runtimes python3.10 python3.11 python3.12 nodejs18.x nodejs20.x provided.al2 \
+            --compatible-architectures x86_64 \
+            --zip-file fileb://ffmpeg-layer.zip)
 
-                  echo "$OUTPUT"
-                  ARN=$(echo "$OUTPUT" | jq -r .LayerVersionArn)
-                  VERSION_NUMBER=$(echo "$OUTPUT" | jq -r .Version)
+          echo "$OUTPUT"
+          ARN=$(echo "$OUTPUT" | jq -r .LayerVersionArn)
+          VERSION_NUMBER=$(echo "$OUTPUT" | jq -r .Version)
 
-                  echo "arn=$ARN" >> $GITHUB_OUTPUT
-                  echo "version_number=$VERSION_NUMBER" >> $GITHUB_OUTPUT
+          echo "arn=$ARN" >> $GITHUB_OUTPUT
+          echo "version_number=$VERSION_NUMBER" >> $GITHUB_OUTPUT
 
-            - name: Make layer version public
-              run: |
-                  aws lambda add-layer-version-permission \
-                    --layer-name ffmpeg-static \
-                    --version-number ${{ steps.publish.outputs.version_number }} \
-                    --statement-id public-access-${{ steps.publish.outputs.version_number }} \
-                    --action lambda:GetLayerVersion \
-                    --principal '*'
+      - name: Make layer version public
+        run: |
+          aws lambda add-layer-version-permission \
+            --layer-name ffmpeg-static \
+            --version-number ${{ steps.publish.outputs.version_number }} \
+            --statement-id public-access-${{ steps.publish.outputs.version_number }} \
+            --action lambda:GetLayerVersion \
+            --principal '*'
 
-            - name: Create GitHub release
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: ffmpeg-${{ steps.version.outputs.version }}
-                  name: FFmpeg ${{ steps.version.outputs.version }}
-                  body: |
-                      **FFmpeg ${{ steps.version.outputs.version }}** published as a new Lambda Layer version.
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ffmpeg-${{ steps.version.outputs.version }}
+          name: FFmpeg ${{ steps.version.outputs.version }}
+          body: |
+            **FFmpeg ${{ steps.version.outputs.version }}** published as a new Lambda Layer version.
 
-                      **Layer name:** `ffmpeg-static`  
-                      **Layer version:** `${{ steps.publish.outputs.version_number }}`  
-                      **ARN:** `${{ steps.publish.outputs.arn }}`
+            **Layer name:** `ffmpeg-static`  
+            **Layer version:** `${{ steps.publish.outputs.version_number }}`  
+            **ARN:** `${{ steps.publish.outputs.arn }}`
 
-                      - Built from [johnvansickle.com](https://johnvansickle.com/ffmpeg/)
-                      - License: GPLv3
-                  files: ffmpeg-layer.zip
+            - Built from [johnvansickle.com](https://johnvansickle.com/ffmpeg/)
+            - License: GPLv3
+          files: ffmpeg-layer.zip
